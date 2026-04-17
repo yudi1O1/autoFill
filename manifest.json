@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Quick Fill",
+  "version": "1.1",
+  "description": "Remembers and auto-fills form data across websites with secure exports and a protected card vault",
+  "icons": {
+    "16": "icon-16.png",
+    "32": "icon-32.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "permissions": ["storage", "activeTab", "downloads"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "QuickFill Data Manager",
+    "default_icon": {
+      "16": "icon-16.png",
+      "32": "icon-32.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
+}

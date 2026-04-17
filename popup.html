@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuickFill Dashboard</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <p class="eyebrow">QuickFill</p>
+        <h1>Personal Data Dashboard</h1>
+        <p class="hero-copy">
+          Review saved form data, edit or export it, and keep card details
+          behind a password-protected vault.
+        </p>
+      </section>
+
+      <section class="summary-grid">
+        <button
+          id="toggle-profile-panel"
+          class="summary-card summary-toggle"
+          type="button"
+          aria-expanded="false"
+        >
+          <div>
+            <p class="summary-label">Saved fields</p>
+            <strong id="profile-count">0</strong>
+          </div>
+        </button>
+
+        <button
+          id="toggle-vault-panel"
+          class="summary-card summary-toggle"
+          type="button"
+          aria-expanded="false"
+        >
+          <div>
+            <p class="summary-label">Cards in vault</p>
+            <strong id="vault-count">0</strong>
+          </div>
+        </button>
+      </section>
+
+      <section id="profile-panel" class="panel hidden">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Saved fields</p>
+            <h2>Manage profile data</h2>
+          </div>
+          <button id="clear-profile" class="ghost-button hidden" type="button">
+            Clear all
+          </button>
+        </div>
+
+        <form id="profile-form" class="stack-form">
+          <input id="profile-key" type="text" placeholder="Add new field name" required />
+          <input id="profile-value" type="text" placeholder="Add field value" required />
+          <div class="action-row">
+            <button id="profile-submit" type="submit">Save field</button>
+            <button id="profile-cancel" class="ghost-button hidden" type="button">
+              Cancel
+            </button>
+          </div>
+        </form>
+
+        <form id="profile-security-form" class="stack-form subtle-block">
+          <input
+            id="profile-security-password"
+            type="password"
+            placeholder="Delete password"
+            autocomplete="new-password"
+            required
+          />
+          <button id="profile-security-submit" class="ghost-button" type="submit">
+            Save delete password
+          </button>
+        </form>
+
+        <div class="toolbar">
+          <button id="export-word" type="button">Word</button>
+          <button id="export-pdf" type="button">PDF</button>
+          <button id="export-json" class="ghost-button" type="button">
+            JSON
+          </button>
+        </div>
+
+        <div id="profile-list" class="card-list empty-state">
+          No profile data saved yet.
+        </div>
+      </section>
+
+      <section id="vault-content" class="panel hidden">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Card vault</p>
+            <h2>Manage saved cards</h2>
+          </div>
+          <div class="vault-actions">
+            <button id="lock-vault" class="ghost-button hidden" type="button">
+              Lock
+            </button>
+            <button id="delete-vault" class="danger-button hidden" type="button">
+              Delete vault
+            </button>
+          </div>
+        </div>
+
+        <div id="vault-status" class="status-chip">Vault locked</div>
+
+        <form id="vault-setup-form" class="stack-form hidden">
+          <input
+            id="vault-password"
+            type="password"
+            placeholder="Create master password"
+            autocomplete="new-password"
+          />
+          <input
+            id="vault-password-confirm"
+            type="password"
+            placeholder="Confirm master password"
+            autocomplete="new-password"
+          />
+          <button id="vault-create" type="submit">Create vault</button>
+        </form>
+
+        <form id="vault-unlock-form" class="stack-form hidden">
+          <input
+            id="unlock-password"
+            type="password"
+            placeholder="Enter master password"
+            autocomplete="current-password"
+          />
+          <button id="vault-unlock" type="submit">Unlock vault</button>
+        </form>
+
+        <div id="vault-panel" class="hidden">
+          <form id="card-form" class="stack-form">
+            <input id="card-label" type="text" placeholder="Card label" required />
+            <input id="card-name" type="text" placeholder="Name on card" required />
+            <input id="card-number" type="text" inputmode="numeric" placeholder="Card number" required />
+            <div class="grid-two">
+              <input id="card-expiry-month" type="text" inputmode="numeric" placeholder="MM" required />
+              <input id="card-expiry-year" type="text" inputmode="numeric" placeholder="YYYY" required />
+            </div>
+            <div class="grid-two">
+              <input id="card-cvv" type="password" inputmode="numeric" placeholder="CVV" required />
+              <input id="card-zip" type="text" placeholder="ZIP / PIN" />
+            </div>
+            <button id="card-submit" type="submit">Save card</button>
+          </form>
+          <div id="card-list" class="card-list empty-state">No cards saved yet.</div>
+        </div>
+      </section>
+
+      <p id="feedback" class="feedback" aria-live="polite"></p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
