@@ -1,30 +1,44 @@
 const PROFILE_KEY = "__quickfill_profile";
 const VAULT_KEY = "__quickfill_card_vault";
 const PROFILE_SECURITY_KEY = "__quickfill_profile_security";
-const RESERVED_KEYS = new Set([PROFILE_KEY, VAULT_KEY, PROFILE_SECURITY_KEY]);
+const CARD_AUTOFILL_CVV_KEY = "__quickfill_card_autofill_cvv";
+const CARD_REVEAL_MS = 30000;
+const PROFILE_REVEAL_MS = 30000;
+const RESERVED_KEYS = new Set([
+  PROFILE_KEY,
+  VAULT_KEY,
+  PROFILE_SECURITY_KEY,
+  CARD_AUTOFILL_CVV_KEY,
+]);
 
 let profileEditKey = null;
 let cardEditId = null;
 let unlockedVault = null;
 let unlockedPassword = "";
+let activeView = "profile";
+let revealedCardId = null;
+let revealTimer = null;
+let revealedProfileKey = null;
+let profileRevealTimer = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
+  applyExpandedMode();
   bindEvents();
   await migrateLegacyStorage();
   await refreshAll();
+  setActiveView("profile");
 });
 
 function bindEvents() {
   document
+    .getElementById("expand-dashboard")
+    .addEventListener("click", openExpandedDashboard);
+  document
     .getElementById("toggle-profile-panel")
-    .addEventListener("click", () =>
-      toggleSection("profile-panel", "toggle-profile-panel", "saved fields"),
-    );
+    .addEventListener("click", () => setActiveView("profile"));
   document
     .getElementById("toggle-vault-panel")
-    .addEventListener("click", () =>
-      toggleSection("vault-content", "toggle-vault-panel", "card vault"),
-    );
+    .addEventListener("click", () => setActiveView("vault"));
   document
     .getElementById("profile-security-form")
     .addEventListener("submit", saveProfileSecurityPassword);
@@ -57,15 +71,59 @@ function bindEvents() {
     .getElementById("delete-vault")
     .addEventListener("click", deleteVault);
   document.getElementById("card-form").addEventListener("submit", saveCard);
+  document
+    .getElementById("autofill-cvv")
+    .addEventListener("change", saveCardAutofillCvvSetting);
 }
 
-function toggleSection(panelId, buttonId, label) {
-  const panel = document.getElementById(panelId);
-  const button = document.getElementById(buttonId);
-  const isHidden = panel.classList.contains("hidden");
+function applyExpandedMode() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("view") === "expanded") {
+    document.body.classList.add("expanded-view");
+    const expandButton = document.getElementById("expand-dashboard");
+    expandButton.setAttribute("aria-label", "Close fullscreen dashboard");
+    expandButton.title = "Close fullscreen dashboard";
+  }
+}
 
-  panel.classList.toggle("hidden", !isHidden);
-  button.setAttribute("aria-expanded", String(isHidden));
+function openExpandedDashboard() {
+  if (document.body.classList.contains("expanded-view")) {
+    closeExpandedDashboard();
+    return;
+  }
+
+  chrome.tabs.create({
+    url: chrome.runtime.getURL("popup.html?view=expanded"),
+  });
+}
+
+function closeExpandedDashboard() {
+  if (chrome.tabs?.getCurrent && chrome.tabs?.remove) {
+    chrome.tabs.getCurrent((tab) => {
+      if (tab?.id) {
+        chrome.tabs.remove(tab.id);
+        return;
+      }
+
+      window.close();
+    });
+    return;
+  }
+
+  window.close();
+}
+
+function setActiveView(view) {
+  activeView = view;
+  const isProfile = view === "profile";
+  document.getElementById("profile-panel").classList.toggle("hidden", !isProfile);
+  document.getElementById("vault-content").classList.toggle("hidden", isProfile);
+  document
+    .getElementById("toggle-profile-panel")
+    .setAttribute("aria-selected", String(isProfile));
+  document
+    .getElementById("toggle-vault-panel")
+    .setAttribute("aria-selected", String(!isProfile));
 }
 
 async function migrateLegacyStorage() {
@@ -95,9 +153,11 @@ async function refreshAll() {
   const profile = await getProfileData();
   const vault = await getVaultData();
   const profileSecurity = await getProfileSecurity();
+  const cardAutofillCvv = await getCardAutofillCvvSetting();
 
   renderProfile(profile, profileSecurity);
   renderVault(vault);
+  renderCardAutofillCvvSetting(cardAutofillCvv);
 }
 
 async function getProfileData() {
@@ -117,6 +177,20 @@ async function getProfileSecurity() {
 async function getVaultData() {
   const items = await storageGet([VAULT_KEY]);
   return items[VAULT_KEY] || null;
+}
+
+async function getCardAutofillCvvSetting() {
+  const items = await storageGet([CARD_AUTOFILL_CVV_KEY]);
+  return Boolean(items[CARD_AUTOFILL_CVV_KEY]);
+}
+
+async function saveCardAutofillCvvSetting(event) {
+  await storageSet({ [CARD_AUTOFILL_CVV_KEY]: event.target.checked });
+  setFeedback(event.target.checked ? "CVV autofill enabled." : "CVV autofill disabled.");
+}
+
+function renderCardAutofillCvvSetting(enabled) {
+  document.getElementById("autofill-cvv").checked = enabled;
 }
 
 function renderProfile(profile, profileSecurity) {
@@ -144,6 +218,7 @@ function renderProfile(profile, profileSecurity) {
   Object.entries(profile)
     .sort(([a], [b]) => a.localeCompare(b))
     .forEach(([key, value]) => {
+      const isRevealed = revealedProfileKey === key;
       const card = document.createElement("article");
       card.className = "entry-card";
 
@@ -156,11 +231,17 @@ function renderProfile(profile, profileSecurity) {
       title.textContent = key;
       const body = document.createElement("div");
       body.className = "entry-value";
-      body.textContent = value || "(empty)";
+      body.textContent = isRevealed ? value || "(empty)" : "Hidden - password required";
       textWrap.append(title, body);
 
       const actions = document.createElement("div");
       actions.className = "entry-actions";
+
+      const viewButton = document.createElement("button");
+      viewButton.type = "button";
+      viewButton.className = "ghost-button";
+      viewButton.textContent = isRevealed ? "Hide details" : "View details";
+      viewButton.addEventListener("click", () => toggleProfileDetails(key));
 
       const editButton = document.createElement("button");
       editButton.type = "button";
@@ -174,7 +255,7 @@ function renderProfile(profile, profileSecurity) {
       deleteButton.textContent = "Delete";
       deleteButton.addEventListener("click", () => deleteProfileField(key));
 
-      actions.append(editButton, deleteButton);
+      actions.append(viewButton, editButton, deleteButton);
       head.append(textWrap, actions);
       card.append(head);
       list.append(card);
@@ -233,6 +314,7 @@ function renderCardList(cards) {
   cardList.innerHTML = "";
 
   cards.forEach((card) => {
+    const isRevealed = revealedCardId === card.id;
     const cardEl = document.createElement("article");
     cardEl.className = "entry-card";
 
@@ -256,8 +338,27 @@ function renderCardList(cards) {
 
     textWrap.append(title, subtext);
 
+    if (isRevealed) {
+      const details = document.createElement("div");
+      details.className = "card-sensitive-details";
+      details.textContent = `Card number: ${formatCardNumber(card.number)} | CVV: ${card.cvv}`;
+      textWrap.append(details);
+    }
+
     const actions = document.createElement("div");
     actions.className = "entry-actions";
+
+    const viewButton = document.createElement("button");
+    viewButton.type = "button";
+    viewButton.className = "ghost-button";
+    viewButton.textContent = isRevealed ? "Hide details" : "View details";
+    viewButton.addEventListener("click", () => toggleCardDetails(card.id));
+
+    const fillButton = document.createElement("button");
+    fillButton.type = "button";
+    fillButton.className = "ghost-button";
+    fillButton.textContent = "Fill this card";
+    fillButton.addEventListener("click", () => fillCard(card.id));
 
     const editButton = document.createElement("button");
     editButton.type = "button";
@@ -271,7 +372,7 @@ function renderCardList(cards) {
     deleteButton.textContent = "Delete";
     deleteButton.addEventListener("click", () => removeCard(card.id));
 
-    actions.append(editButton, deleteButton);
+    actions.append(viewButton, fillButton, editButton, deleteButton);
     head.append(textWrap, actions);
     cardEl.append(head);
     cardList.append(cardEl);
@@ -297,6 +398,7 @@ async function handleProfileSubmit(event) {
   }
   profile[nextKey] = nextValue;
   await setProfileData(profile);
+  clearRevealedProfile();
   resetProfileForm();
   renderProfile(profile, await getProfileSecurity());
   setFeedback("Profile data saved.");
@@ -324,12 +426,22 @@ async function saveProfileSecurityPassword(event) {
   });
 
   document.getElementById("profile-security-form").reset();
+  clearRevealedProfile();
   const profile = await getProfileData();
   renderProfile(profile, await getProfileSecurity());
-  setFeedback("Delete password saved.");
+  setFeedback("Password saved.");
 }
 
-function beginProfileEdit(key, value) {
+async function beginProfileEdit(key, value) {
+  const authorized = await verifyProfilePasswordAction({
+    missingMessage: "Set a password before editing saved fields.",
+    promptMessage: "Enter your password to edit this saved field:",
+    cancelMessage: "Edit canceled.",
+  });
+  if (!authorized) {
+    return;
+  }
+
   profileEditKey = key;
   document.getElementById("profile-key").value = key;
   document.getElementById("profile-value").value = value;
@@ -345,7 +457,11 @@ function resetProfileForm() {
 }
 
 async function deleteProfileField(key) {
-  const authorized = await verifyProfileDestructiveAction();
+  const authorized = await verifyProfilePasswordAction({
+    missingMessage: "Set a password before removing saved fields.",
+    promptMessage: "Enter your password to delete this saved field:",
+    cancelMessage: "Delete action canceled.",
+  });
   if (!authorized) {
     return;
   }
@@ -358,6 +474,9 @@ async function deleteProfileField(key) {
   const profile = await getProfileData();
   delete profile[key];
   await setProfileData(profile);
+  if (revealedProfileKey === key) {
+    clearRevealedProfile();
+  }
   if (profileEditKey === key) {
     resetProfileForm();
   }
@@ -366,7 +485,11 @@ async function deleteProfileField(key) {
 }
 
 async function clearProfileData() {
-  const authorized = await verifyProfileDestructiveAction();
+  const authorized = await verifyProfilePasswordAction({
+    missingMessage: "Set a password before clearing saved fields.",
+    promptMessage: "Enter your password to clear saved fields:",
+    cancelMessage: "Clear action canceled.",
+  });
   if (!authorized) {
     return;
   }
@@ -377,27 +500,60 @@ async function clearProfileData() {
   }
 
   await setProfileData({});
+  clearRevealedProfile();
   resetProfileForm();
   renderProfile({}, await getProfileSecurity());
   setFeedback("All profile data cleared.");
 }
 
-async function verifyProfileDestructiveAction() {
+async function toggleProfileDetails(key) {
+  if (revealedProfileKey === key) {
+    clearRevealedProfile();
+    renderProfile(await getProfileData(), await getProfileSecurity());
+    return;
+  }
+
+  clearRevealedProfile();
+  const authorized = await verifyProfilePasswordAction({
+    missingMessage: "Set a password before viewing saved details.",
+    promptMessage: "Enter your password to view this saved field:",
+    cancelMessage: "View canceled.",
+  });
+  if (!authorized) {
+    renderProfile(await getProfileData(), await getProfileSecurity());
+    return;
+  }
+
+  revealedProfileKey = key;
+  window.clearTimeout(profileRevealTimer);
+  profileRevealTimer = window.setTimeout(async () => {
+    clearRevealedProfile();
+    renderProfile(await getProfileData(), await getProfileSecurity());
+  }, PROFILE_REVEAL_MS);
+  renderProfile(await getProfileData(), await getProfileSecurity());
+  setFeedback("Saved field revealed for 30 seconds.");
+}
+
+async function verifyProfilePasswordAction({
+  missingMessage,
+  promptMessage,
+  cancelMessage,
+}) {
   const security = await getProfileSecurity();
   if (!security) {
-    setFeedback("Set a delete password before removing saved fields.", true);
+    setFeedback(missingMessage, true);
     return false;
   }
 
-  const password = prompt("Enter your delete password to continue:");
+  const password = prompt(promptMessage);
   if (!password) {
-    setFeedback("Delete action canceled.", true);
+    setFeedback(cancelMessage, true);
     return false;
   }
 
   const isValid = await verifyPassword(password, security);
   if (!isValid) {
-    setFeedback("Incorrect delete password.", true);
+    setFeedback("Incorrect password.", true);
     return false;
   }
 
@@ -408,6 +564,15 @@ async function exportProfileData(format) {
   const profile = await getProfileData();
   if (!Object.keys(profile).length) {
     setFeedback("There is no saved profile data to export.", true);
+    return;
+  }
+
+  const authorized = await verifyProfilePasswordAction({
+    missingMessage: "Set a password before exporting saved fields.",
+    promptMessage: `Enter your password to export ${format.toUpperCase()}:`,
+    cancelMessage: "Export canceled.",
+  });
+  if (!authorized) {
     return;
   }
 
@@ -491,6 +656,7 @@ async function unlockVault(event) {
 function lockVault() {
   unlockedVault = null;
   unlockedPassword = "";
+  clearRevealedCard();
   resetCardForm();
   getVaultData().then((vault) => renderVault(vault));
   setFeedback("Vault locked.");
@@ -505,6 +671,7 @@ async function deleteVault() {
   await storageRemove(VAULT_KEY);
   unlockedVault = null;
   unlockedPassword = "";
+  clearRevealedCard();
   resetCardForm();
   await refreshAll();
   setFeedback("Vault deleted.");
@@ -553,6 +720,7 @@ async function saveCard(event) {
   const encrypted = await encryptVaultData(unlockedVault, unlockedPassword);
   encrypted.cardCount = cards.length;
   await storageSet({ [VAULT_KEY]: encrypted });
+  clearRevealedCard();
   resetCardForm();
   renderVault(encrypted);
   setFeedback("Card saved to the protected vault.");
@@ -595,11 +763,137 @@ async function removeCard(cardId) {
   const encrypted = await encryptVaultData(unlockedVault, unlockedPassword);
   encrypted.cardCount = unlockedVault.cards.length;
   await storageSet({ [VAULT_KEY]: encrypted });
+  clearRevealedCard();
   if (cardEditId === cardId) {
     resetCardForm();
   }
   renderVault(encrypted);
   setFeedback("Card removed from vault.");
+}
+
+async function toggleCardDetails(cardId) {
+  if (revealedCardId === cardId) {
+    clearRevealedCard();
+    renderVault(await getVaultData());
+    return;
+  }
+
+  clearRevealedCard();
+  renderVault(await getVaultData());
+
+  const vaultPayload = await promptForVaultPayload("Enter your master password to view this card:");
+  if (!vaultPayload) {
+    return;
+  }
+
+  const card = (vaultPayload.cards || []).find((item) => item.id === cardId);
+  if (!card) {
+    setFeedback("Card not found in vault.", true);
+    return;
+  }
+
+  unlockedVault = vaultPayload;
+  revealedCardId = cardId;
+  window.clearTimeout(revealTimer);
+  revealTimer = window.setTimeout(async () => {
+    clearRevealedCard();
+    renderVault(await getVaultData());
+  }, CARD_REVEAL_MS);
+  renderVault(await getVaultData());
+  setFeedback("Card details revealed for 30 seconds.");
+}
+
+async function fillCard(cardId) {
+  const allowed = confirm("Fill this card into the active page?");
+  if (!allowed) {
+    setFeedback("Card autofill canceled.");
+    return;
+  }
+
+  const vaultPayload = await promptForVaultPayload("Enter your master password to fill this card:");
+  if (!vaultPayload) {
+    return;
+  }
+
+  const card = (vaultPayload.cards || []).find((item) => item.id === cardId);
+  if (!card) {
+    setFeedback("Card not found in vault.", true);
+    return;
+  }
+
+  const includeCvv = await getCardAutofillCvvSetting();
+  try {
+    await sendCardToActiveTab(card, includeCvv);
+    setFeedback(includeCvv ? "Card filled, including CVV." : "Card filled without CVV.");
+  } catch (error) {
+    setFeedback(error?.message || "Could not fill the active page.", true);
+  }
+}
+
+async function promptForVaultPayload(promptText) {
+  const vault = await getVaultData();
+  if (!vault) {
+    setFeedback("Create the vault first.", true);
+    return null;
+  }
+
+  const password = prompt(promptText);
+  if (!password) {
+    setFeedback("Vault password prompt canceled.", true);
+    return null;
+  }
+
+  try {
+    return await decryptVaultData(vault, password);
+  } catch (error) {
+    setFeedback("Incorrect master password.", true);
+    return null;
+  }
+}
+
+function sendCardToActiveTab(card, includeCvv) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "QUICKFILL_FILL_CARD",
+        card: {
+          nameOnCard: card.nameOnCard,
+          number: card.number,
+          expiryMonth: card.expiryMonth,
+          expiryYear: card.expiryYear,
+          cvv: includeCvv ? card.cvv : "",
+          billingZip: card.billingZip || "",
+        },
+        includeCvv,
+      },
+      (response) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+
+        if (!response?.ok) {
+          reject(new Error(response?.error || "No active page accepted the card."));
+          return;
+        }
+
+        resolve(response);
+      },
+    );
+  });
+}
+
+function clearRevealedCard() {
+  revealedCardId = null;
+  window.clearTimeout(revealTimer);
+  revealTimer = null;
+}
+
+function clearRevealedProfile() {
+  revealedProfileKey = null;
+  window.clearTimeout(profileRevealTimer);
+  profileRevealTimer = null;
 }
 
 function resetCardForm() {
@@ -814,6 +1108,10 @@ function maskCardNumber(number) {
   const digits = number.replace(/\D/g, "");
   const visible = digits.slice(-4).padStart(digits.length, "*");
   return visible.replace(/(.{4})/g, "$1 ").trim();
+}
+
+function formatCardNumber(number) {
+  return number.replace(/\D/g, "").replace(/(.{4})/g, "$1 ").trim();
 }
 
 function escapeHtml(value) {

@@ -9,20 +9,32 @@
   <body>
     <main class="app-shell">
       <section class="hero">
-        <p class="eyebrow">QuickFill</p>
-        <h1>Personal Data Dashboard</h1>
-        <p class="hero-copy">
-          Review saved form data, edit or export it, and keep card details
-          behind a password-protected vault.
-        </p>
+        <div class="hero-heading">
+          <div class="brand-header">
+            <img class="brand-logo" src="icon-48.png" alt="" aria-hidden="true" />
+            <h1 class="brand-name" aria-label="QuickFill">
+              <span class="brand-name-quick">Quick</span><span class="brand-name-fill">Fill</span>
+            </h1>
+          </div>
+          <button
+            id="expand-dashboard"
+            class="icon-button expand-button"
+            type="button"
+            aria-label="Open fullscreen dashboard"
+            title="Open fullscreen dashboard"
+          >
+            <span class="fullscreen-icon" aria-hidden="true"></span>
+          </button>
+        </div>
       </section>
 
-      <section class="summary-grid">
+      <nav class="view-tabs" aria-label="QuickFill views">
         <button
           id="toggle-profile-panel"
-          class="summary-card summary-toggle"
+          class="view-tab"
           type="button"
-          aria-expanded="false"
+          aria-controls="profile-panel"
+          aria-selected="true"
         >
           <div>
             <p class="summary-label">Saved fields</p>
@@ -32,18 +44,19 @@
 
         <button
           id="toggle-vault-panel"
-          class="summary-card summary-toggle"
+          class="view-tab"
           type="button"
-          aria-expanded="false"
+          aria-controls="vault-content"
+          aria-selected="false"
         >
           <div>
             <p class="summary-label">Cards in vault</p>
             <strong id="vault-count">0</strong>
           </div>
         </button>
-      </section>
+      </nav>
 
-      <section id="profile-panel" class="panel hidden">
+      <section id="profile-panel" class="panel">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Saved fields</p>
@@ -108,6 +121,11 @@
         </div>
 
         <div id="vault-status" class="status-chip">Vault locked</div>
+
+        <label class="switch-row">
+          <span>Autofill CVV</span>
+          <input id="autofill-cvv" type="checkbox" />
+        </label>
 
         <form id="vault-setup-form" class="stack-form hidden">
           <input
