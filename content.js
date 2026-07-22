@@ -81,6 +81,18 @@ function getFillableInputs(scope = document) {
   );
 }
 
+function getInputValue(input) {
+  if (
+    input instanceof HTMLInputElement &&
+    ["checkbox", "radio"].includes(input.type) &&
+    !input.checked
+  ) {
+    return "";
+  }
+
+  return input.value?.trim() || "";
+}
+
 function getCardFillableInputs(scope = document) {
   return scope.querySelectorAll(
     'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="file"]), select',
@@ -247,23 +259,31 @@ function saveFormData() {
 
     form.dataset.quickfillBound = "true";
     form.addEventListener("submit", () => {
-      chrome.storage.local.get([PROFILE_KEY], (items) => {
-        const existingProfile = items[PROFILE_KEY] || {};
-        const nextProfile = { ...existingProfile };
+      const fields = [];
+      const fieldNames = new Set();
 
-        getFillableInputs(form).forEach((input) => {
-          const identifier = getFieldIdentifier(input);
-          const value = input.value?.trim();
-          if (!identifier || !value || isCardField(input)) {
-            return;
-          }
+      getFillableInputs(form).forEach((input) => {
+        const identifier = getFieldIdentifier(input);
+        const value = getInputValue(input);
+        if (!identifier || !value || isCardField(input)) {
+          return;
+        }
 
-          const normalized = normalizeFieldName(identifier);
-          nextProfile[normalized] = value;
-        });
+        const fieldName = normalizeFieldName(identifier);
+        if (!fieldName || fieldNames.has(fieldName)) {
+          return;
+        }
 
-        chrome.storage.local.set({ [PROFILE_KEY]: nextProfile });
+        fieldNames.add(fieldName);
+        fields.push({ name: fieldName, value });
       });
+
+      if (fields.length) {
+        chrome.runtime.sendMessage({
+          type: "QUICKFILL_SAVE_FORM_FIELDS",
+          fields,
+        });
+      }
     });
   });
 }
