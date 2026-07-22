@@ -2,6 +2,8 @@ const PROFILE_KEY = "__quickfill_profile";
 const PROFILE_SECURITY_KEY = "__quickfill_profile_security";
 
 let profileAutofillAttempted = false;
+let profileAutofillInProgress = false;
+let observerRefreshTimer = null;
 
 function normalizeFieldName(name) {
   if (!name) {
@@ -48,6 +50,22 @@ function getFieldIdentifier(input) {
     input.getAttribute("placeholder") ||
     getLabelText(input)
   );
+}
+
+function getSavedProfileValue(profile, identifier) {
+  const normalized = normalizeFieldName(identifier);
+  if (profile[normalized]) {
+    return profile[normalized];
+  }
+
+  if (profile[identifier]) {
+    return profile[identifier];
+  }
+
+  const matchingKey = Object.keys(profile).find(
+    (key) => normalizeFieldName(key) === normalized,
+  );
+  return matchingKey ? profile[matchingKey] : "";
 }
 
 function getFieldSearchText(input) {
@@ -196,10 +214,10 @@ function setNativeValue(input, value) {
 }
 
 async function autoFillForms() {
-  if (profileAutofillAttempted) {
+  if (profileAutofillAttempted || profileAutofillInProgress) {
     return;
   }
-  profileAutofillAttempted = true;
+  profileAutofillInProgress = true;
 
   const items = await storageGet([PROFILE_KEY, PROFILE_SECURITY_KEY]);
   const profile = items[PROFILE_KEY] || {};
@@ -212,35 +230,40 @@ async function autoFillForms() {
       return;
     }
 
-    const normalized = normalizeFieldName(identifier);
-    const savedValue = profile[normalized];
+    const savedValue = getSavedProfileValue(profile, identifier);
     if (savedValue) {
       fieldsToFill.push({ input, savedValue });
     }
   });
 
   if (!fieldsToFill.length) {
+    profileAutofillInProgress = false;
     return;
   }
 
+  profileAutofillAttempted = true;
   const allowed = confirm("QuickFill found saved data for this page. Do you want to autofill it?");
   if (!allowed) {
+    profileAutofillInProgress = false;
     return;
   }
 
   if (!security) {
     alert("Set a QuickFill password before autofilling saved data.");
+    profileAutofillInProgress = false;
     return;
   }
 
   const password = prompt("Enter your QuickFill password to autofill saved data:");
   if (!password) {
+    profileAutofillInProgress = false;
     return;
   }
 
   const isValid = await verifyPassword(password, security);
   if (!isValid) {
     alert("Incorrect QuickFill password. Autofill canceled.");
+    profileAutofillInProgress = false;
     return;
   }
 
@@ -249,6 +272,7 @@ async function autoFillForms() {
       setNativeValue(input, savedValue);
     }
   });
+  profileAutofillInProgress = false;
 }
 
 function saveFormData() {
@@ -285,6 +309,38 @@ function saveFormData() {
         });
       }
     });
+  });
+}
+
+function refreshQuickFill() {
+  saveFormData();
+  autoFillForms();
+}
+
+function scheduleQuickFillRefresh() {
+  window.clearTimeout(observerRefreshTimer);
+  observerRefreshTimer = window.setTimeout(refreshQuickFill, 250);
+}
+
+function watchForDynamicForms() {
+  const observer = new MutationObserver((mutations) => {
+    const hasFormChange = mutations.some((mutation) =>
+      Array.from(mutation.addedNodes).some(
+        (node) =>
+          node instanceof Element &&
+          (node.matches("form, input, textarea, select") ||
+            Boolean(node.querySelector("form, input, textarea, select"))),
+      ),
+    );
+
+    if (hasFormChange) {
+      scheduleQuickFillRefresh();
+    }
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
   });
 }
 
@@ -354,13 +410,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
-  autoFillForms();
-  saveFormData();
+  refreshQuickFill();
+  watchForDynamicForms();
 });
 
 if (document.readyState !== "loading") {
-  autoFillForms();
-  saveFormData();
+  refreshQuickFill();
+  watchForDynamicForms();
 }
 
 function storageGet(keys) {

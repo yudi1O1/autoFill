@@ -20,6 +20,7 @@ let revealedCardId = null;
 let revealTimer = null;
 let revealedProfileKey = null;
 let profileRevealTimer = null;
+let profileUnlocked = false;
 
 document.addEventListener("DOMContentLoaded", async () => {
   applyExpandedMode();
@@ -42,6 +43,12 @@ function bindEvents() {
   document
     .getElementById("profile-security-form")
     .addEventListener("submit", saveProfileSecurityPassword);
+  document
+    .getElementById("profile-unlock-form")
+    .addEventListener("submit", unlockProfileFields);
+  document
+    .getElementById("profile-lock")
+    .addEventListener("click", lockProfileFields);
   document
     .getElementById("profile-form")
     .addEventListener("submit", handleProfileSubmit);
@@ -199,12 +206,33 @@ function renderProfile(profile, profileSecurity) {
   const clearButton = document.getElementById("clear-profile");
   const passwordInput = document.getElementById("profile-security-password");
   const passwordButton = document.getElementById("profile-security-submit");
+  const unlockForm = document.getElementById("profile-unlock-form");
+  const unlockInput = document.getElementById("profile-unlock-password");
+  const unlockButton = document.getElementById("profile-unlock-submit");
+  const lockButton = document.getElementById("profile-lock");
+  const profileForm = document.getElementById("profile-form");
+  const toolbar = document.querySelector("#profile-panel .toolbar");
+  const canViewProfile = !profileSecurity || profileUnlocked;
   document.getElementById("profile-count").textContent = String(count);
-  clearButton.classList.toggle("hidden", count === 0);
+  clearButton.classList.toggle("hidden", count === 0 || !canViewProfile);
   passwordInput.placeholder = profileSecurity
-    ? "Update delete password"
-    : "Set delete password";
+    ? "Update saved fields password"
+    : "Set saved fields password";
   passwordButton.textContent = profileSecurity ? "Update password" : "Save password";
+  unlockForm.classList.toggle("hidden", !profileSecurity);
+  unlockInput.classList.toggle("hidden", profileUnlocked);
+  unlockButton.classList.toggle("hidden", profileUnlocked);
+  lockButton.classList.toggle("hidden", !profileUnlocked);
+  profileForm.classList.toggle("hidden", !canViewProfile);
+  toolbar.classList.toggle("hidden", !canViewProfile);
+
+  if (!canViewProfile) {
+    list.className = "card-list empty-state";
+    list.textContent = count
+      ? "Enter the saved fields password to view and manage saved data."
+      : "Enter the saved fields password to add or manage saved data.";
+    return;
+  }
 
   if (!count) {
     list.className = "card-list empty-state";
@@ -218,7 +246,6 @@ function renderProfile(profile, profileSecurity) {
   Object.entries(profile)
     .sort(([a], [b]) => a.localeCompare(b))
     .forEach(([key, value]) => {
-      const isRevealed = revealedProfileKey === key;
       const card = document.createElement("article");
       card.className = "entry-card";
 
@@ -231,17 +258,11 @@ function renderProfile(profile, profileSecurity) {
       title.textContent = key;
       const body = document.createElement("div");
       body.className = "entry-value";
-      body.textContent = isRevealed ? value || "(empty)" : "Hidden - password required";
+      body.textContent = value || "(empty)";
       textWrap.append(title, body);
 
       const actions = document.createElement("div");
       actions.className = "entry-actions";
-
-      const viewButton = document.createElement("button");
-      viewButton.type = "button";
-      viewButton.className = "ghost-button";
-      viewButton.textContent = isRevealed ? "Hide details" : "View details";
-      viewButton.addEventListener("click", () => toggleProfileDetails(key));
 
       const editButton = document.createElement("button");
       editButton.type = "button";
@@ -255,7 +276,7 @@ function renderProfile(profile, profileSecurity) {
       deleteButton.textContent = "Delete";
       deleteButton.addEventListener("click", () => deleteProfileField(key));
 
-      actions.append(viewButton, editButton, deleteButton);
+      actions.append(editButton, deleteButton);
       head.append(textWrap, actions);
       card.append(head);
       list.append(card);
@@ -384,7 +405,7 @@ async function handleProfileSubmit(event) {
 
   const keyInput = document.getElementById("profile-key");
   const valueInput = document.getElementById("profile-value");
-  const nextKey = keyInput.value.trim();
+  const nextKey = normalizeProfileKey(keyInput.value);
   const nextValue = valueInput.value.trim();
 
   if (!nextKey || !nextValue) {
@@ -404,6 +425,38 @@ async function handleProfileSubmit(event) {
   setFeedback("Profile data saved.");
 }
 
+function normalizeProfileKey(key) {
+  const value = key.trim().toLowerCase();
+  if (!value) {
+    return "";
+  }
+
+  if (value.includes("email")) return "email";
+  if (value.includes("phone") || value.includes("tel") || value.includes("mobile")) {
+    return "phone";
+  }
+  if (
+    value.includes("name") &&
+    !value.includes("user") &&
+    !value.includes("company")
+  ) {
+    return "name";
+  }
+  if (value.includes("address")) return "address";
+  if (
+    value.includes("letter") ||
+    value.includes("cover") ||
+    value.includes("application")
+  ) {
+    return "application_letter";
+  }
+  if (value.includes("message") || value.includes("comment")) {
+    return "message";
+  }
+
+  return value.replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || key.trim();
+}
+
 async function saveProfileSecurityPassword(event) {
   event.preventDefault();
 
@@ -412,7 +465,7 @@ async function saveProfileSecurityPassword(event) {
     .value.trim();
 
   if (password.length < 4) {
-    setFeedback("Use at least 4 characters for the delete password.", true);
+    setFeedback("Use at least 4 characters for the saved fields password.", true);
     return;
   }
 
@@ -426,19 +479,46 @@ async function saveProfileSecurityPassword(event) {
   });
 
   document.getElementById("profile-security-form").reset();
+  profileUnlocked = true;
   clearRevealedProfile();
   const profile = await getProfileData();
   renderProfile(profile, await getProfileSecurity());
   setFeedback("Password saved.");
 }
 
+async function unlockProfileFields(event) {
+  event.preventDefault();
+
+  const passwordInput = document.getElementById("profile-unlock-password");
+  const password = passwordInput.value;
+  const security = await getProfileSecurity();
+  if (!security) {
+    setFeedback("Set a saved fields password first.", true);
+    return;
+  }
+
+  const isValid = await verifyPassword(password, security);
+  if (!isValid) {
+    setFeedback("Incorrect password.", true);
+    return;
+  }
+
+  profileUnlocked = true;
+  passwordInput.value = "";
+  renderProfile(await getProfileData(), security);
+  setFeedback("Saved fields unlocked.");
+}
+
+async function lockProfileFields() {
+  profileUnlocked = false;
+  clearRevealedProfile();
+  resetProfileForm();
+  renderProfile(await getProfileData(), await getProfileSecurity());
+  setFeedback("Saved fields locked.");
+}
+
 async function beginProfileEdit(key, value) {
-  const authorized = await verifyProfilePasswordAction({
-    missingMessage: "Set a password before editing saved fields.",
-    promptMessage: "Enter your password to edit this saved field:",
-    cancelMessage: "Edit canceled.",
-  });
-  if (!authorized) {
+  if (!(await requireUnlockedProfile())) {
     return;
   }
 
@@ -457,12 +537,7 @@ function resetProfileForm() {
 }
 
 async function deleteProfileField(key) {
-  const authorized = await verifyProfilePasswordAction({
-    missingMessage: "Set a password before removing saved fields.",
-    promptMessage: "Enter your password to delete this saved field:",
-    cancelMessage: "Delete action canceled.",
-  });
-  if (!authorized) {
+  if (!(await requireUnlockedProfile())) {
     return;
   }
 
@@ -485,12 +560,7 @@ async function deleteProfileField(key) {
 }
 
 async function clearProfileData() {
-  const authorized = await verifyProfilePasswordAction({
-    missingMessage: "Set a password before clearing saved fields.",
-    promptMessage: "Enter your password to clear saved fields:",
-    cancelMessage: "Clear action canceled.",
-  });
-  if (!authorized) {
+  if (!(await requireUnlockedProfile())) {
     return;
   }
 
@@ -514,12 +584,7 @@ async function toggleProfileDetails(key) {
   }
 
   clearRevealedProfile();
-  const authorized = await verifyProfilePasswordAction({
-    missingMessage: "Set a password before viewing saved details.",
-    promptMessage: "Enter your password to view this saved field:",
-    cancelMessage: "View canceled.",
-  });
-  if (!authorized) {
+  if (!(await requireUnlockedProfile())) {
     renderProfile(await getProfileData(), await getProfileSecurity());
     return;
   }
@@ -531,29 +596,18 @@ async function toggleProfileDetails(key) {
     renderProfile(await getProfileData(), await getProfileSecurity());
   }, PROFILE_REVEAL_MS);
   renderProfile(await getProfileData(), await getProfileSecurity());
-  setFeedback("Saved field revealed for 30 seconds.");
+  setFeedback("Saved field visible.");
 }
 
-async function verifyProfilePasswordAction({
-  missingMessage,
-  promptMessage,
-  cancelMessage,
-}) {
+async function requireUnlockedProfile() {
   const security = await getProfileSecurity();
   if (!security) {
-    setFeedback(missingMessage, true);
+    setFeedback("Set a saved fields password first.", true);
     return false;
   }
 
-  const password = prompt(promptMessage);
-  if (!password) {
-    setFeedback(cancelMessage, true);
-    return false;
-  }
-
-  const isValid = await verifyPassword(password, security);
-  if (!isValid) {
-    setFeedback("Incorrect password.", true);
+  if (!profileUnlocked) {
+    setFeedback("Unlock saved fields first.", true);
     return false;
   }
 
@@ -567,12 +621,7 @@ async function exportProfileData(format) {
     return;
   }
 
-  const authorized = await verifyProfilePasswordAction({
-    missingMessage: "Set a password before exporting saved fields.",
-    promptMessage: `Enter your password to export ${format.toUpperCase()}:`,
-    cancelMessage: "Export canceled.",
-  });
-  if (!authorized) {
+  if (!(await requireUnlockedProfile())) {
     return;
   }
 

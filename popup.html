@@ -82,13 +82,29 @@
           <input
             id="profile-security-password"
             type="password"
-            placeholder="Delete password"
+            placeholder="Saved fields password"
             autocomplete="new-password"
             required
           />
           <button id="profile-security-submit" class="ghost-button" type="submit">
-            Save delete password
+            Save password
           </button>
+        </form>
+
+        <form id="profile-unlock-form" class="stack-form subtle-block hidden">
+          <input
+            id="profile-unlock-password"
+            type="password"
+            placeholder="Enter saved fields password"
+            autocomplete="current-password"
+            required
+          />
+          <div class="action-row">
+            <button id="profile-unlock-submit" type="submit">Unlock saved fields</button>
+            <button id="profile-lock" class="ghost-button hidden" type="button">
+              Lock
+            </button>
+          </div>
         </form>
 
         <div class="toolbar">
